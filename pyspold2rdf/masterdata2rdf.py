@@ -13,8 +13,9 @@ The package is compatible with the IEO ontology[1].
 import argparse
 import xml.etree.ElementTree as Xml
 from os.path import splitext, abspath
-from rdflib import Graph, Literal, Namespace, RDF, RDFS
+from rdflib import Graph, Literal, Namespace, RDF, RDFS, OWL
 from unit import ecoinvent_units
+from ieo_types import nom_graph
 
 
 # Constant
@@ -29,8 +30,14 @@ MATERIAL_ENTITY = BFO.BFO_0000040
 IAO.denotes = IAO.IAO_0000219
 BFO.has_part = BFO.BFO_0000051
 BFO.part_of = BFO.BFO_0000050
-LCA_DATABASE = IEO.IEO_0000043
+REGISTRY_VERSION = IEO.IEO_0000043
 LCA_REGISTRY = IEO.IEO_0000044
+REF_ACTIVITY = IEO.IEO_0000065
+ACT_CRID = IEO.IEO_0000066
+ACT_REGISTRY = IEO.IEO_0000067
+REF_PRODUCT = IEO.IEO_0000068
+PROD_CRID = IEO.IEO_0000069
+PROD_REGISTRY = IEO.IEO_0000070
 
 
 def define_registry(func):
@@ -41,19 +48,14 @@ def define_registry(func):
         # crid_reg: CRID registry, e.g Ecoinvent
         crid_reg = registry['reg_id']
         crid_reg_label = registry['label']
-        graph.add((LCA_REGISTRY, RDFS.label,
-                   Literal('life cycle database registry', lang='en')))
         graph.add((ECO[crid_reg], RDF.type, LCA_REGISTRY))
-        graph.add((ECO[crid_reg], RDFS.label, Literal(crid_reg_label)))
         # Database identifier, e.g. EcoInvent3.1
         major_release = xml_root.attrib['majorRelease']
         minor_release = xml_root.attrib['minorRelease']
         database_version = f'v{major_release}_{minor_release}'
-        graph.add((LCA_DATABASE, RDFS.label,
-                   Literal('life cycle database version', lang='en')))
         database_id = crid_reg+database_version
         database_label = crid_reg_label+f'v{major_release}.{minor_release}'
-        graph.add((ECO[database_id], RDF.type, LCA_DATABASE))
+        graph.add((ECO[database_id], RDF.type, REGISTRY_VERSION))
         graph.add((ECO[database_id], RDFS.label,
                    Literal(database_label)))
         graph.add((ECO[database_id], IAO.denotes, ECO[crid_reg]))
@@ -101,6 +103,13 @@ def act2graph(graph: Graph, xml_root: Xml, registry: dict,
     database_version = f'v{major_release}_{minor_release}'
     database_label = f'{crid_reg_label}{major_release}.{minor_release}'
     database_id = crid_reg+database_version
+    graph.add((ECO[crid_reg], RDFS.label, Literal(crid_reg_label, lang='en')))
+    graph.add((ECO.activityId, RDFS.subClassOf, ACT_CRID))
+    activity_id_label = 'EcoInvent activity identifier'
+    graph.add((ECO.activityId, RDFS.label, Literal(activity_id_label, lang='en')))
+    graph.add((ECO.activity_name, RDFS.subClassOf, REF_ACTIVITY))
+    activity_label = 'EcoInvent activity label'
+    graph.add((ECO.activity_name, RDFS.label, Literal(activity_label, lang='en')))
     for activity_name in xml_root.findall(tag, namespaces):
         activity_name_id = activity_name.attrib['id']
         crid = activity_name_id+database_version
@@ -154,6 +163,17 @@ def inter2graph(graph: Graph, xml_root: Xml,
     database_version = f'v{major_release}_{minor_release}'
     database_label = f'{crid_reg_label}{major_release}.{minor_release}'
     database_id = crid_reg+database_version
+    graph.add((ECO[crid_reg], RDFS.label, Literal(crid_reg_label, lang='en')))
+    graph.add((ECO.interm_exch_Id, RDFS.subClassOf, PROD_CRID))
+    int_exch_id_label = 'EcoInvent intermediary exchange identifier'
+    graph.add((ECO.interm_exch_Id, RDFS.label, Literal(int_exch_id_label, lang='en')))
+    graph.add((ECO.interm_exch_name, RDFS.subClassOf, REF_PRODUCT))
+    int_exch_label = 'EcoInvent intermediary exchange label'
+    graph.add((ECO.interm_exch_name, RDFS.label, Literal(int_exch_label, lang='en')))
+    graph.add((IEO.to_sort, RDFS.label, Literal('product to sort', lang='en')))
+    to_sort_comment = """Some product cannot be automatically defined as a good (material entity) or a service by the masterdata2rdf.py script. In this case, the product is defined as a product to sort. It's a temporary class that should not existed. Once the instance of this class are sorted, the product to sort class should be suppressed.
+    """
+    graph.add((IEO.to_sort, RDFS.comment, Literal(to_sort_comment, lang='en')))
     for inter_exch in xml_root.findall(tag, namespaces):
         inter_exch_id = inter_exch.attrib['id']
         crid = inter_exch_id+database_version
@@ -227,6 +247,13 @@ def elem2graph(graph: Graph, xml_root: Xml,
     database_version = f'v{major_release}_{minor_release}'
     database_label = f'{crid_reg_label}{major_release}.{minor_release}'
     database_id = crid_reg+database_version
+    graph.add((ECO[crid_reg], RDFS.label, Literal(crid_reg_label, lang='en')))
+    graph.add((ECO.elementary_exchange_id, RDFS.subClassOf, PROD_CRID))
+    elem_exch_id_label = 'EcoInvent elementary exchange identifier'
+    graph.add((ECO.elementary_exchange_id, RDFS.label, Literal(elem_exch_id_label, lang='en')))
+    graph.add((ECO.elem_exch_name, RDFS.subClassOf, REF_PRODUCT))
+    elem_exch_label = 'EcoInvent elementary exchange label'
+    graph.add((ECO.elem_exch_name, RDFS.label, Literal(elem_exch_label, lang='en')))
     for elem_exch in xml_root.findall(tag, namespaces):
         elem_exch_id = elem_exch.attrib['id']
         crid = elem_exch_id+database_version
@@ -241,6 +268,10 @@ def elem2graph(graph: Graph, xml_root: Xml,
         xml_ns = namespaces['xml']
         product_id = elem_exch_id+'t_prod'
         graph.add((ECO[elem_exch_id], IAO.denotes, ECO[product_id]))
+        graph.add((IEO.to_sort, RDFS.label, Literal('product to sort', lang='en')))
+        to_sort_comment = """Some product cannot be automatically defined as a good (material entity) or a service by the masterdata2rdf.py script. In this case, the product is defined as a product to sort. It's a temporary class that should not existed. Once the instance of this class are sorted, the product to sort class should be suppressed.
+        """
+        graph.add((IEO.to_sort, RDFS.comment, Literal(to_sort_comment, lang='en')))
         for name in elem_exch.findall('eco:name', namespaces):
             lang = name.attrib['{'+xml_ns+'}lang']
             compartment = "eco:compartment/eco:compartment[@xml:lang='"+lang+"']"
@@ -272,7 +303,7 @@ def xml2graph(path: str) -> Graph:
     the output is a RDF graph. It detects the content of the masterData
     (activity, intermediary exchange, elementary exchange...) and applies it
     the proper function."""
-    graph = Graph()
+    graph = nom_graph()
     tree = Xml.parse(path)
     root = tree.getroot()
     # define the dictionary of function
@@ -332,14 +363,15 @@ def main():
     -----
 
     Command in shell:
-    $ python3 xml2rdf.py [OPTION] file1.xml
+    $ python3 masterdata2rdf.py [OPTION] file1.xml
 
     Arguments:
     file1.xml: the Ecoinvent's MasterData file to transforme. It has to
     respect the Ecospold2 format for MasterData.
 
     Options:
-    -output, -o"""
+    -output, -o path of the output file
+    --format, -f format of the output"""
     # create the parser
     parser = argparse.ArgumentParser(
         description=description,
