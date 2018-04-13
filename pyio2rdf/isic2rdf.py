@@ -12,9 +12,12 @@ The package is compatible with the IEO ontology[1].
 [1]: https://github.com/cfrancois7/IEO-ontology
 
 """
-
+import argparse
+from os.path import splitext, abspath
 from rdflib import Graph, Literal, Namespace, RDF, RDFS
 from pandas import read_csv, DataFrame
+from ieo_types import nom_graph
+
 
 ISIC = Namespace('https://unstats.un.org/unsd/cr/registry/')
 BFO = OBI = IAO = Namespace('http://purl.obolibrary.org/obo/')
@@ -23,8 +26,10 @@ IAO.denotes = IAO.IAO_0000219
 BFO.has_part = BFO.BFO_0000051
 BFO.part_of = BFO.BFO_0000050
 # Industrial activity classification (IAC)
-IAC_DATABASE = IEO.IEO_0000065
-IAC_REGISTRY = IEO.IEO_0000066
+REGISTRY_VERSION = IEO.IEO_0000043
+REF_ACTIVITY = IEO.IEO_0000065
+ACTITIVY_CRID = IEO.IEO_0000066
+STAT_REGISTRY = IEO.IEO_0000071
 
 
 def sup_spe_charact(text: str):
@@ -46,30 +51,38 @@ def verify_version() -> int:
 
 
 def isic2crid(data: DataFrame) -> Graph:
-    graph = Graph()
+    graph = nom_graph()
     crid_reg = 'ISIC'
     crid_reg_label = 'International Standard Industrial Classification'
     version = str(verify_version())
-    graph.add((IAC_REGISTRY, RDFS.label,
-               Literal('Industrial activity classification registry', lang='en')))
-    graph.add((ISIC[crid_reg], RDF.type, IAC_REGISTRY))
+    graph.add((STAT_REGISTRY, RDFS.label,
+               Literal('statistical classification registry', lang='en')))
+    graph.add((ISIC[crid_reg], RDF.type, STAT_REGISTRY))
     graph.add((ISIC[crid_reg], RDFS.label, Literal(crid_reg_label)))
     database_id = 'ISIC_Rev'+version
-    database_label = 'International Standard Industrial Classification Rev'+version
-    graph.add((IAC_DATABASE, RDFS.label,
-               Literal('Industrial activity classification version', lang='en')))
-    graph.add((ISIC[database_id], RDF.type, IAC_DATABASE))
+    database_label = 'International Standard Industrial Classification (ISIC) Rev'+version
+    graph.add((REGISTRY_VERSION, RDFS.label,
+               Literal('registry version', lang='en')))
+    graph.add((ISIC[database_id], RDF.type, REGISTRY_VERSION))
     graph.add((ISIC[database_id], RDFS.label,
                Literal(database_label)))
-    graph.add((ECO[database_id], IAO.denotes, ECO[crid_reg]))
+    graph.add((ISIC[database_id], IAO.denotes, ISIC[crid_reg]))
     graph.add((IAO.denotes, RDFS.label,
                Literal('denotes', lang='en')))
+    classification_label = f'ISIC Rev{version} identifier'
+    graph.add((ISIC.classification, RDFS.label, Literal(classification_label, lang='en')))
+    graph.add((ISIC.classification, RDFS.subClassOf, ACTITIVY_CRID))
+    ind_sector_label = classification_label+' label'
+    graph.add((ISIC.industrial_sector, RDFS.subClassOf, REF_ACTIVITY))
+    graph.add((ISIC.industrial_sector, RDFS.label, Literal(ind_sector_label, lang='en')))
     for code in data.index:
         activity_label = data.loc[code][0]
         crid = f'{database_id}_{code}'
         crid_label = f'{database_id}:{code} {activity_label}'
         activity_id = sup_spe_charact(activity_label)
-        graph.add((ISIC[activity_id], RDF.type, ISIC.industrial_sector_label))
+        graph.add((ISIC[activity_id], RDF.type, ISIC.industrial_sector))
+        graph.add((ISIC[activity_id], RDFS.label, Literal(activity_label, lang='en')))
+        graph.add((ISIC[crid], RDFS.label, Literal(crid_label, lang='en')))
         graph.add((ISIC[crid], RDF.type, ISIC.classification))
         graph.add((ISIC[crid], RDFS.label, Literal(crid_label, lang='en')))
         graph.add((ISIC[crid], BFO.has_part, ISIC[database_id]))
@@ -79,11 +92,84 @@ def isic2crid(data: DataFrame) -> Graph:
     return graph
 
 
-def transform_xml(data: DataFrame, path: str):
-    graph = isic2crid(data)
-    graph.serialize(path, format='xml')
+def avoid_overwrite(output_path: str) -> str:
+    """ The function prevents the overwriting of the source file by the
+    output."""
+    message = """" The path for the output and the input file is the same.
+    The input file is going to be overwritten. Are you sure to overwrite
+    the input file? (Yes/No): """
+    answer = input(message).lower()
+    if answer in ['yes', 'y']:
+        return output_path
+    elif answer in ('no', 'n'):
+        message = " What is the new path? (absolute or relative path): "
+        new_path = input(message)
+        return new_path
+    else:
+        print('Error. The expected answer is Yes or No.')
+        return avoid_overwrite(output_path)
 
 
-def transform_json(data: DataFrame, path: str):
+def main():
+    description = """Transform ISIC classification registry into Graph and export
+    it to the proper format."""
+    usage = """ Usage:
+    -----
+
+    Command in shell:
+    $ python3 isic2rdf.py [OPTION] file1.xml
+
+    Arguments:
+    file1.xml: the Ecoinvent's MasterData file to transforme. It has to
+    respect the Ecospold2 format for MasterData.
+
+    Options:
+    -output, -o path of the output file
+    --format, -f format of the output"""
+    # create the parser
+    parser = argparse.ArgumentParser(
+        description=description,
+        usage=usage)
+    parser.add_argument(
+        "--format", '-f',
+        nargs=1,
+        choices=['json-ld', 'xml', 'n3', 'nt'],
+        default=['xml'],
+        help='the output format of the file (default: Xml)')
+    parser.add_argument(
+        "input_path",
+        metavar='path_to_input_file',
+        nargs=1,
+        type=str,
+        help="the ISIC's file to transforme.")
+    parser.add_argument(
+        "output_path",
+        metavar='path_to_output_file',
+        nargs='?',
+        type=str,
+        default=False,
+        help="the path of the output (default: input_name.format)")
+    args = parser.parse_args()
+    input_path = args.input_path[0]
+    try:
+        data = read_csv(input_path, index_col=0)
+    except:
+        raise('Error in the input file. Impossible to open it. '\
+              'The format expected is [code][label]')
     graph = isic2crid(data)
-    graph.serialize(path, format='json-ld')
+    if not args.output_path:
+        path = abspath(args.input_path[0])
+        name_file = splitext(path)[0]
+        new_ext = {'json-ld': '.json', 'xml': '.rdf', 'n3': '.n3',
+                   'nt': '.nt'}
+        new_ext = new_ext[args.format[0]]
+        output_path = name_file+new_ext
+    else:
+        output_path = args.output_path
+    if input_path == output_path:
+        output_path = avoid_overwrite(output_path)
+    graph.serialize(output_path, format=args.format[0])
+
+
+if __name__ == "__main__":
+    main()
